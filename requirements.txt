@@ -1,0 +1,14 @@
+daggr==0.5.2
+torch==2.8.0
+transformers==4.57.3
+accelerate==1.12.0
+einops
+gradio
+librosa
+torchaudio
+soundfile
+sox
+onnxruntime
+spaces
+torch
+numpy
