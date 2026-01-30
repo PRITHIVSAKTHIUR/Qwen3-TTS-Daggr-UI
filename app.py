@@ -7,6 +7,7 @@ import torch
 import torchaudio
 import soundfile as sf
 import gradio as gr
+from typing import Any, Dict, List, Optional, Tuple, Union
 from huggingface_hub import snapshot_download, login
 
 from daggr import FnNode, Graph
@@ -23,40 +24,79 @@ MODEL_SIZES = ["0.6B", "1.7B"]
 SPEAKERS = [
     "Aiden", "Dylan", "Eric", "Ono_anna", "Ryan", "Serena", "Sohee", "Uncle_fu", "Vivian"
 ]
-LANGUAGES = ["Auto", "Chinese", "English", "Japanese", "Korean", "French", "German", "Spanish", "Portuguese", "Russian"]
+
+TTS_LANGUAGES = ["Auto", "Chinese", "English", "Japanese", "Korean", "French", "German", "Spanish", "Portuguese", "Russian"]
+
+ASR_SUPPORTED_LANGUAGES = [
+    "Chinese", "Cantonese", "English", "Arabic", "German", "French",
+    "Spanish", "Portuguese", "Indonesian", "Italian", "Korean", "Russian",
+    "Thai", "Vietnamese", "Japanese", "Turkish", "Hindi", "Malay",
+    "Dutch", "Swedish", "Danish", "Finnish", "Polish", "Czech",
+    "Filipino", "Persian", "Greek", "Romanian", "Hungarian", "Macedonian"
+]
+
+def _title_case_display(s: str) -> str:
+    s = (s or "").strip()
+    s = s.replace("_", " ")
+    return " ".join([w[:1].upper() + w[1:] if w else "" for w in s.split()])
+
+def _build_choices_and_map(items: Optional[List[str]]) -> Tuple[List[str], Dict[str, str]]:
+    if not items:
+        return [], {}
+    display = [_title_case_display(x) for x in items]
+    mapping = {d: r for d, r in zip(display, items)}
+    return display, mapping
+
+ASR_LANG_DISPLAY, ASR_LANG_MAP = _build_choices_and_map(ASR_SUPPORTED_LANGUAGES)
+ASR_LANG_CHOICES = ["Auto"] + ASR_LANG_DISPLAY
 
 def get_model_path(model_type: str, model_size: str) -> str:
     """Download/Get model path based on type and size."""
+    if model_type == "ASR":
+        return "Qwen/Qwen3-ASR-1.7B"
     return snapshot_download(f"Qwen/Qwen3-TTS-12Hz-{model_size}-{model_type}")
 
 def get_model(model_type: str, model_size: str):
     """
-    Lazy load models. Unloads previous models if VRAM is tight 
-    (though Python GC usually handles this if references are dropped).
+    Lazy load models. Unloads previous models if VRAM is tight.
     """
     global loaded_models
     key = (model_type, model_size)
     
     if key not in loaded_models:
+        print(f"--- Clearing Cache before loading {model_type} ---")
+        loaded_models.clear()
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
         print(f"--- Loading Model: {model_type} {model_size} ---")
         
-        from qwen_tts import Qwen3TTSModel
-        
-        model_path = get_model_path(model_type, model_size)
-        
         device = "cuda" if torch.cuda.is_available() else "cpu"
         dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
-        
-        loaded_models[key] = Qwen3TTSModel.from_pretrained(
-            model_path,
-            device_map=device,
-            dtype=dtype,
-            token=HF_TOKEN,
-        )
+
+        if model_type == "ASR":
+            from qwen_asr import Qwen3ASRModel
+            # Load ASR with Forced Aligner for timestamps
+            loaded_models[key] = Qwen3ASRModel.from_pretrained(
+                "Qwen/Qwen3-ASR-1.7B",
+                dtype=dtype,
+                device_map=device,
+                forced_aligner="Qwen/Qwen3-ForcedAligner-0.6B",
+                forced_aligner_kwargs=dict(dtype=dtype, device_map=device),
+                max_inference_batch_size=4, 
+                attn_implementation="sdpa",
+            )
+        else:
+            # Load TTS
+            from qwen_tts import Qwen3TTSModel
+            model_path = get_model_path(model_type, model_size)
+            loaded_models[key] = Qwen3TTSModel.from_pretrained(
+                model_path,
+                device_map=device,
+                dtype=dtype,
+                token=HF_TOKEN,
+            )
         
     return loaded_models[key]
 
@@ -90,7 +130,7 @@ def _normalize_audio(wav, eps=1e-12, clip=True):
 def process_audio_input(audio_input):
     """
     Handles Filepaths, Data URIs (base64), and Numpy arrays.
-    Fixes the 'File path not found: data:audio...' error.
+    Returns (numpy_float32, sample_rate_int)
     """
     if audio_input is None:
         return None
@@ -116,14 +156,19 @@ def process_audio_input(audio_input):
                 return None
 
         if isinstance(audio_input, tuple) and len(audio_input) == 2:
-            sr, wav = audio_input
-            return _normalize_audio(wav), int(sr)
+            a0, a1 = audio_input
+            if isinstance(a0, int):
+                return _normalize_audio(a1), int(a0)
+            else:
+                return _normalize_audio(a0), int(a1)
 
         if isinstance(audio_input, dict):
             if "name" in audio_input:
                 return process_audio_input(audio_input["name"])
             if "path" in audio_input:
                 return process_audio_input(audio_input["path"])
+            if "sampling_rate" in audio_input and "data" in audio_input:
+                return _normalize_audio(audio_input["data"]), int(audio_input["sampling_rate"])
 
         return None
 
@@ -205,6 +250,45 @@ def run_custom_voice(text, language, speaker, instruct, model_size):
     except Exception as e:
         return None, f"Error: {str(e)}"
 
+def run_asr(audio_upload, lang_disp):
+    """Automatic Speech Recognition"""
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    if audio_upload is None:
+        return "", "", "No Audio"
+
+    processed_audio = process_audio_input(audio_upload)
+    if processed_audio is None:
+        return "", "", "Error processing audio"
+    
+    language = None
+    if lang_disp and lang_disp != "Auto":
+        language = ASR_LANG_MAP.get(lang_disp, lang_disp)
+
+    try:
+        asr_model = get_model("ASR", "1.7B")
+
+        results = asr_model.transcribe(
+            audio=processed_audio,
+            language=language,
+            return_time_stamps=False,
+        )
+
+        if not isinstance(results, list) or len(results) != 1:
+            return "", "", "Unexpected result format"
+
+        r = results[0]
+        detected_lang = getattr(r, "language", "") or ""
+        transcribed_text = getattr(r, "text", "") or ""
+
+        return detected_lang, transcribed_text, "Success"
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return "", "", f"Error: {str(e)}"
+
 voice_design_node = FnNode(
     fn=run_voice_design,
     inputs={
@@ -215,7 +299,7 @@ voice_design_node = FnNode(
         ),
         "language": gr.Dropdown(
             label="Language (Voice Design)", 
-            choices=LANGUAGES, 
+            choices=TTS_LANGUAGES, 
             value="Auto"
         ),
         "voice_description": gr.Textbox(
@@ -239,7 +323,7 @@ custom_voice_node = FnNode(
             lines=4, 
             value="Hello! Welcome to the Text-to-Speech demo."
         ),
-        "language": gr.Dropdown(label="Language (Custom Voice)", choices=LANGUAGES, value="English"),
+        "language": gr.Dropdown(label="Language (Custom Voice)", choices=TTS_LANGUAGES, value="English"),
         "speaker": gr.Dropdown(label="Speaker (Custom Voice)", choices=SPEAKERS, value="Ryan"),
         "instruct": gr.Textbox(label="Style Instruction (Custom Voice)", lines=2, placeholder="e.g. Happy, Sad", value="Neutral"),
         "model_size": gr.Dropdown(label="Model Size (Custom Voice)", choices=MODEL_SIZES, value="1.7B"),
@@ -257,7 +341,7 @@ voice_clone_node = FnNode(
         "ref_audio": gr.Audio(label="Reference Audio (Voice Clone)", type="filepath"),
         "ref_text": gr.Textbox(label="Reference Transcript (Voice Clone)", lines=2),
         "target_text": gr.Textbox(label="Target Text (Voice Clone)", lines=4),
-        "language": gr.Dropdown(label="Language (Voice Clone)", choices=LANGUAGES, value="Auto"),
+        "language": gr.Dropdown(label="Language (Voice Clone)", choices=TTS_LANGUAGES, value="Auto"),
         "use_xvector_only": gr.Checkbox(label="Use x-vector only (Voice Clone)", value=False),
         "model_size": gr.Dropdown(label="Model Size (Voice Clone)", choices=MODEL_SIZES, value="1.7B"),
     },
@@ -268,9 +352,23 @@ voice_clone_node = FnNode(
     name="Voice Clone"
 )
 
+asr_node = FnNode(
+    fn=run_asr,
+    inputs={
+        "audio_upload": gr.Audio(label="Upload Audio (Qwen3 ASR)", type="numpy", sources=["upload", "microphone"]),
+        "lang_disp": gr.Dropdown(label="Language (Qwen3 ASR)", choices=ASR_LANG_CHOICES, value="Auto"),
+    },
+    outputs={
+        "detected_lang": gr.Textbox(label="Detected Language", interactive=False),
+        "transcription": gr.Textbox(label="Transcription Result", lines=6, interactive=True),
+        "status": gr.Textbox(label="Status", interactive=False),
+    },
+    name="Qwen3 ASR"
+)
+
 graph = Graph(
     name="Qwen3-TTS-Daggr-UI",
-    nodes=[voice_design_node, custom_voice_node, voice_clone_node]
+    nodes=[voice_design_node, custom_voice_node, voice_clone_node, asr_node]
 )
 
 if __name__ == "__main__":
