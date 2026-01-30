@@ -13,6 +13,9 @@ https://github.com/user-attachments/assets/69490c35-a0e5-48c1-9e2c-93add26b0764
 
 https://github.com/user-attachments/assets/90b6ed75-ea5c-4a10-a059-d73431ee3793
 
+
+https://github.com/user-attachments/assets/8d847e8b-1d0b-4752-912b-470dd3591154
+
 ## Features
 - **Modular UI with Daggr**: Four independent nodes for Voice Design, Voice Clone, Custom Voice, and Qwen3 ASR, allowing parallel or sequential workflows.
 - **Lazy Model Loading**: Models (Base, CustomVoice, VoiceDesign for TTS; ASR) load on-demand based on task and size, minimizing VRAM usage.
