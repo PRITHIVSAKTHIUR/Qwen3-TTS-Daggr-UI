@@ -1,4 +1,4 @@
-daggr==0.5.2
+daggr==0.5.4
 torch
 transformers==4.57.3
 accelerate==1.12.0
@@ -14,3 +14,4 @@ onnxruntime
 scipy
 torch
 numpy
+
