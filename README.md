@@ -70,7 +70,7 @@ https://github.com/user-attachments/assets/8d847e8b-1d0b-4752-912b-470dd3591154
     soundfile
     librosa
     einops
-    gradio #gradio@6
+    gradio #gradio@6.3.0
     scipy
     torch
     numpy
