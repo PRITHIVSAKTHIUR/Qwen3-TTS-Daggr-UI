@@ -1,4 +1,4 @@
-# **Qwen3-TTS-Daggr-UI**
+# **[Qwen3-TTS-Daggr-UI](https://huggingface.co/spaces/prithivMLmods/Qwen3-TTS-Daggr-UI)**
 
 `Qwen3-TTS-Daggr-UI` is an advanced speech-processing workspace combining next-generation automatic speech recognition (ASR) and neural text-to-speech (TTS) architectures under the Qwen3 framework. The application relies on `daggr`, a directed acyclic graph (DAG) UI execution engine built over Gradio, providing modular, component-driven pipelines for speech synthesis and transcription tasks.
 
