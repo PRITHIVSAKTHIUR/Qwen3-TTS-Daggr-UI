@@ -96,7 +96,7 @@ Execution requires Python 3.12+ along with an active CUDA environment to acceler
 
 `uv` is an ultra-fast Python package installer and dependency resolver. It isolates execution contexts instantly and securely.
 
-**1. Install `uv**`
+**1. Install `uv`**
 
 * **Linux / macOS:** `curl -LsSf https://astral.sh/uv/install.sh | sh`
 * **Windows (PowerShell):** `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`
