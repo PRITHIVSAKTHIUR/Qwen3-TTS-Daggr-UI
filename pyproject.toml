@@ -1,0 +1,23 @@
+[project]
+name = "qwen3-tts-daggr-ui"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "accelerate==1.12.0",
+    "daggr==0.8.0",
+    "einops>=0.8.2",
+    "gradio==6.16.0",
+    "librosa>=0.11.0",
+    "nagisa==0.2.11",
+    "numpy>=2.4.6",
+    "onnxruntime>=1.26.0",
+    "scipy>=1.17.1",
+    "soundfile>=0.14.0",
+    "sox>=1.5.0",
+    "soynlp==0.0.493",
+    "torch==2.11.0",
+    "torchaudio>=2.11.0",
+    "transformers==4.57.3",
+]
